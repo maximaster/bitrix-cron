@@ -1,0 +1,79 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Maximaster\BitrixCron\AgentsRunner;
+use Maximaster\BitrixLoader\BitrixLoader;
+
+$autoloadFromComposerGlobal = static function (): ?bool {
+    global $_composer_autoload_path;
+    if (is_string($_composer_autoload_path)) {
+        require_once $_composer_autoload_path;
+
+        return true;
+    }
+
+    return null;
+};
+
+$autoloadFromVendor = static function (): ?bool {
+    require_once __DIR__ . '/../../../autoload.php';
+
+    return true;
+};
+
+$autoloadFromComposerGlobal() ?? $autoloadFromVendor();
+
+[, $action, $documentRoot] = array_pad($argv, 3, null);
+$loader = $documentRoot === null ? BitrixLoader::fromGuess() : new BitrixLoader($documentRoot);
+
+$handleAction = static function (BitrixLoader $loader, ?string $action) use (&$handleAction): int {
+    static $success = 0;
+    static $failure = 1;
+
+    switch ($action) {
+        case 'help':
+            echo <<<HELP
+            Доступные команды:
+
+            > enable-agents     # устанавливает agents_use_crontab и check_agents в значение N;
+            > run-agents        # выполняет запуск всех агентов;
+
+            Все команды, опционально, принимают аргумент DOCUMENT_ROOT. Если он не передан, скрипт попытается
+            догадаться где находится DOCUMENT_ROOT.
+
+            HELP;
+            return $success;
+        case 'enable-agents':
+            $loader->prologBefore(static fn () => $loader->defineConsoleScriptConstants());
+
+            COption::SetOptionString('main', 'agents_use_crontab', 'N');
+            if (COption::GetOptionString('main', 'agents_use_crontab', 'N') !== 'N') {
+                echo 'Не удалось установить опцию agents_use_crontab в значение N.' . PHP_EOL;
+
+                return $failure;
+            }
+
+            COption::SetOptionString('main', 'check_agents', 'N');
+            if (COption::GetOptionString('main', 'check_agents', 'Y') !== 'N') {
+                echo 'Не удалось установить опцию check_agents в значение N.' . PHP_EOL;
+
+                return $failure;
+            }
+
+            echo '[OK] Настройка опций для выполнения всех агентов на cron завершена успешно.' . PHP_EOL;
+
+            return $success;
+        case 'run-agents':
+            $agentsRunner = new AgentsRunner($loader);
+            $agentsRunner->run();
+        default:
+            echo sprintf('[KO] Неизвестное действие: %s. Вывожу подсказку: ', $action ?? '(не передано)') . PHP_EOL;
+            $handleAction($loader, 'help');
+
+            return $failure;
+    }
+};
+
+exit($handleAction($loader, $action));
